@@ -31,6 +31,7 @@ func newNotification() notify.Notification {
 func main() {
 	battery := plugin.NewBattery()
 	ping := plugin.NewPing()
+	notification := plugin.NewNotification()
 
 	go (func() {
 		conn, err := dbus.SessionBus()
@@ -43,7 +44,7 @@ func main() {
 		for {
 			select {
 			case event := <-ping.Incoming:
-				log.Println("New ping from device:", event.Device.Name)
+				log.Println("Ping:", event.Device.Name)
 
 				n := newNotification()
 				n.AppIcon = getDeviceIcon(event.Device)
@@ -58,6 +59,18 @@ func main() {
 					n.Summary = event.Device.Name+" has low battery"
 					notifier.SendNotification(n)
 				}
+			case event := <-notification.Incoming:
+				log.Println("Notification:", event.Device.Name, event.NotificationBody)
+
+				if event.Silent {
+					break
+				}
+
+				n := newNotification()
+				n.AppIcon = getDeviceIcon(event.Device)
+				n.Summary = "Notification from "+event.AppName+" on "+event.Device.Name
+				n.Body = event.Ticker
+				notifier.SendNotification(n)
 			}
 		}
 	})()
@@ -65,6 +78,7 @@ func main() {
 	hdlr := plugin.NewHandler()
 	hdlr.Register(battery)
 	hdlr.Register(ping)
+	hdlr.Register(notification)
 
 	e := engine.New(hdlr)
 	e.Listen()
