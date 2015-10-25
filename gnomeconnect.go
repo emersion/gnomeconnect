@@ -10,6 +10,7 @@ import (
 	"github.com/emersion/go-kdeconnect/network"
 	"github.com/godbus/dbus"
 	"github.com/esiqveland/notify"
+	"github.com/emersion/go-mpris"
 )
 
 func getPrivateKey() (priv *crypto.PrivateKey, err error) {
@@ -83,6 +84,7 @@ func main() {
 	battery := plugin.NewBattery()
 	ping := plugin.NewPing()
 	notification := plugin.NewNotification()
+	mprisPlugin := plugin.NewMpris()
 
 	conn, err := dbus.SessionBus()
 	if err != nil {
@@ -126,6 +128,60 @@ func main() {
 				notifier.SendNotification(n)
 
 				// TODO: wait for notification dismiss and send message to remote
+			case event := <-mprisPlugin.Incoming:
+				log.Println("Mpris:", event.Device.Name, event.MprisBody)
+
+				if event.RequestPlayerList {
+					names, err := mpris.List(conn)
+					if err != nil {
+						log.Println("Warning: cannot list available MPRIS players", err)
+						break
+					}
+
+					mprisPlugin.SendPlayerList(event.Device, names)
+				}
+
+				if event.Player != "" {
+					player := mpris.New(conn, event.Player)
+
+					event.RequestNowPlaying = true
+					switch event.Action {
+					case "Next":
+						player.Next()
+					case "Previous":
+						player.Previous()
+					case "Pause":
+						player.Pause()
+					case "PlayPause":
+						player.PlayPause()
+					case "Stop":
+						player.Stop()
+					case "Play":
+						player.Play()
+					default:
+						event.RequestNowPlaying = false
+					}
+
+					if event.SetVolume != 0 {
+						player.SetVolume(float64(event.SetVolume) / 100)
+						event.RequestVolume = true
+					}
+
+					if event.RequestNowPlaying || event.RequestVolume {
+						reply := &plugin.MprisBody{}
+						if event.RequestNowPlaying {
+							metadata := player.GetMetadata()
+							reply.NowPlaying = metadata["xesam:title"].String()
+							reply.IsPlaying = (player.GetPlaybackStatus() == "Playing")
+							reply.Length = float64(metadata["mpris:length"].Value().(int64)) / 1000
+							reply.Pos = float64(player.GetPosition()) / 1000
+						}
+						if event.RequestVolume {
+							reply.Volume = int(player.GetVolume() * 100)
+						}
+						event.Device.Send(plugin.MprisType, reply)
+					}
+				}
 			}
 		}
 	})()
@@ -134,12 +190,20 @@ func main() {
 	hdlr.Register(battery)
 	hdlr.Register(ping)
 	hdlr.Register(notification)
+	hdlr.Register(mprisPlugin)
 
 	e := engine.New(hdlr, config)
 
 	go (func() {
 		devices := map[string]*network.Device{}
 		notifications := map[string]int{}
+
+		defer (func() {
+			// Close all notifications
+			for _, id := range notifications {
+				notifier.CloseNotification(id)
+			}
+		})()
 
 		for {
 			select {
