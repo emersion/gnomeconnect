@@ -111,6 +111,7 @@ func main() {
 					n.Summary = event.Device.Name+" has low battery"
 					notifier.SendNotification(n)
 				}
+				// TODO: remove notification when charging
 			case event := <-notification.Incoming:
 				log.Println("Notification:", event.Device.Name, event.NotificationBody)
 
@@ -136,5 +137,41 @@ func main() {
 	hdlr.Register(notification)
 
 	e := engine.New(hdlr, config)
+
+	go (func() {
+		devices := map[string]*network.Device{}
+		notifications := map[string]int{}
+
+		for {
+			select {
+			case device := <-e.Joins:
+				if device.Id == "" {
+					continue
+				}
+
+				devices[device.Id] = device
+
+				n := newNotification()
+				n.AppIcon = getDeviceIcon(device)
+				n.Summary = device.Name
+				n.Body = "Device connected"
+				n.Hints = map[string]dbus.Variant{
+					"resident": dbus.MakeVariant(true),
+					"category": dbus.MakeVariant("device.added"),
+				}
+				id, _ := notifier.SendNotification(n)
+
+				notifications[device.Id] = int(id)
+			case device := <-e.Leaves:
+				if id, ok := notifications[device.Id]; ok {
+					notifier.CloseNotification(id)
+				}
+				if _, ok := devices[device.Id]; ok {
+					delete(devices, device.Id)
+				}
+			}
+		}
+	})()
+
 	e.Listen()
 }
