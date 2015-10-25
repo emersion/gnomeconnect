@@ -4,7 +4,6 @@ import (
 	"log"
 	"os"
 	"io/ioutil"
-	"crypto/rsa"
 	"github.com/emersion/go-kdeconnect/crypto"
 	"github.com/emersion/go-kdeconnect/engine"
 	"github.com/emersion/go-kdeconnect/plugin"
@@ -13,7 +12,7 @@ import (
 	"github.com/esiqveland/notify"
 )
 
-func getPrivateKey() (priv *rsa.PrivateKey, err error) {
+func getPrivateKey() (priv *crypto.PrivateKey, err error) {
 	configHomeDir := os.Getenv("XDG_CONFIG_HOME")
 	if configHomeDir == "" {
 		homeDir := os.Getenv("HOME")
@@ -32,12 +31,12 @@ func getPrivateKey() (priv *rsa.PrivateKey, err error) {
 	privateKeyFile := configDir+"/private.pem"
 	raw, err := ioutil.ReadFile(privateKeyFile)
 	if err != nil {
-		priv, err = crypto.GenerateKey()
+		priv, err = crypto.GeneratePrivateKey()
 		if err != nil {
 			return
 		}
 
-		raw, err = crypto.MarshalPrivateKey(priv)
+		raw, err = priv.Marshal()
 		if err != nil {
 			return
 		}
