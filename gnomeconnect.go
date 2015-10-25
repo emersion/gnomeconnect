@@ -33,14 +33,14 @@ func main() {
 	ping := plugin.NewPing()
 	notification := plugin.NewNotification()
 
+	conn, err := dbus.SessionBus()
+	if err != nil {
+		panic(err)
+	}
+
+	notifier := notify.New(conn)
+
 	go (func() {
-		conn, err := dbus.SessionBus()
-		if err != nil {
-			panic(err)
-		}
-
-		notifier := notify.New(conn)
-
 		for {
 			select {
 			case event := <-ping.Incoming:
@@ -62,7 +62,8 @@ func main() {
 			case event := <-notification.Incoming:
 				log.Println("Notification:", event.Device.Name, event.NotificationBody)
 
-				if event.Silent {
+				if event.IsCancel {
+					// TODO: dismiss notification
 					break
 				}
 
@@ -71,6 +72,8 @@ func main() {
 				n.Summary = "Notification from "+event.AppName+" on "+event.Device.Name
 				n.Body = event.Ticker
 				notifier.SendNotification(n)
+
+				// TODO: wait for notification dismiss and send message to remote
 			}
 		}
 	})()

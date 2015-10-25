@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=GNOMEConnect
+Exec=gnomeconnect
+Icon=phone
+Type=Application
+Categories=GNOME;Network;
