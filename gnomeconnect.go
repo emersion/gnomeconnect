@@ -2,12 +2,53 @@ package main
 
 import (
 	"log"
+	"os"
+	"io/ioutil"
+	"crypto/rsa"
+	"github.com/emersion/go-kdeconnect/crypto"
 	"github.com/emersion/go-kdeconnect/engine"
 	"github.com/emersion/go-kdeconnect/plugin"
 	"github.com/emersion/go-kdeconnect/network"
 	"github.com/godbus/dbus"
 	"github.com/esiqveland/notify"
 )
+
+func getPrivateKey() (priv *rsa.PrivateKey, err error) {
+	configHomeDir := os.Getenv("XDG_CONFIG_HOME")
+	if configHomeDir == "" {
+		homeDir := os.Getenv("HOME")
+		if homeDir == "" {
+			return
+		}
+		configHomeDir = homeDir+"/.config"
+	}
+
+	configDir := configHomeDir+"/gnomeconnect"
+	err = os.MkdirAll(configDir, 0755)
+	if err != nil {
+		return
+	}
+
+	privateKeyFile := configDir+"/private.pem"
+	raw, err := ioutil.ReadFile(privateKeyFile)
+	if err != nil {
+		priv, err = crypto.GenerateKey()
+		if err != nil {
+			return
+		}
+
+		raw, err = crypto.MarshalPrivateKey(priv)
+		if err != nil {
+			return
+		}
+
+		err = ioutil.WriteFile(privateKeyFile, raw, 0644)
+		return
+	}
+
+	priv, err = crypto.UnmarshalPrivateKey(raw)
+	return
+}
 
 func getDeviceIcon(device *network.Device) string {
 	switch device.Type {
@@ -29,6 +70,17 @@ func newNotification() notify.Notification {
 }
 
 func main() {
+	config := engine.DefaultConfig()
+
+ 	priv, err := getPrivateKey()
+	if priv == nil {
+		log.Fatal("Could not get private key:", err)
+	}
+	if err != nil {
+		log.Println("Warning: error while getting private key:", err)
+	}
+	config.PrivateKey = priv
+
 	battery := plugin.NewBattery()
 	ping := plugin.NewPing()
 	notification := plugin.NewNotification()
@@ -83,6 +135,6 @@ func main() {
 	hdlr.Register(ping)
 	hdlr.Register(notification)
 
-	e := engine.New(hdlr)
+	e := engine.New(hdlr, config)
 	e.Listen()
 }
