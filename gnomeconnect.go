@@ -12,6 +12,7 @@ import (
 	"github.com/godbus/dbus"
 	"github.com/esiqveland/notify"
 	"github.com/emersion/go-mpris"
+	"github.com/allan-simon/go-singleinstance"
 )
 
 func getConfigDir() (configDir string, err error) {
@@ -27,6 +28,16 @@ func getConfigDir() (configDir string, err error) {
 	configDir = configHomeDir+"/gnomeconnect"
 	err = os.MkdirAll(configDir, 0755)
 	return
+}
+
+func createLockFile() error {
+	configDir, err := getConfigDir()
+	if err != nil {
+		return err
+	}
+
+	_, err = singleinstance.CreateLockFile(configDir+"/server.lock")
+	return err
 }
 
 func loadPrivateKey() (priv *crypto.PrivateKey, err error) {
@@ -109,6 +120,11 @@ func newNotification() notify.Notification {
 }
 
 func main() {
+	err := createLockFile()
+	if err != nil {
+		log.Fatal("Cannot create lock file:", err)
+	}
+
 	config := engine.DefaultConfig()
 
  	priv, err := loadPrivateKey()
