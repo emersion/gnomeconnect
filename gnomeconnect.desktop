@@ -2,7 +2,7 @@
 Name=GNOMEConnect
 GenericName=GNOMEConnect
 Comment=Integrate your phone and your computer
-Exec=/bin/bash -i -c "\$GOPATH/bin/gnomeconnect"
+Exec=gnomeconnect
 Icon=phone
 Type=Application
 Categories=Network
