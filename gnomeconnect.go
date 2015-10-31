@@ -91,7 +91,10 @@ func main() {
 		panic(err)
 	}
 
-	notifier := notify.New(conn)
+	notifier, err := notify.New(conn)
+	if err != nil {
+		panic(err)
+	}
 
 	go (func() {
 		for {
@@ -198,12 +201,28 @@ func main() {
 		devices := map[string]*network.Device{}
 		notifications := map[string]int{}
 
+		closed := notifier.NotificationClosed()
+		actions := notifier.ActionInvoked()
+
 		defer (func() {
 			// Close all notifications
 			for _, id := range notifications {
 				notifier.CloseNotification(id)
 			}
 		})()
+
+		getDeviceFromNotification := func (notificationId int) *network.Device {
+			for deviceId, id := range notifications {
+				if id == notificationId {
+					if device, ok := devices[deviceId]; ok {
+						return device
+					} else {
+						return nil
+					}
+				}
+			}
+			return nil
+		}
 
 		for {
 			select {
@@ -217,6 +236,38 @@ func main() {
 				n := newNotification()
 				n.AppIcon = getDeviceIcon(device)
 				n.Summary = device.Name
+				n.Body = "New device available"
+				n.Hints = map[string]dbus.Variant{
+					"category": dbus.MakeVariant("device"),
+				}
+				n.Actions = []string{"pair", "Pair device"}
+				id, _ := notifier.SendNotification(n)
+
+				notifications[device.Id] = int(id)
+			case device := <-e.RequestsPairing:
+				if id, ok := notifications[device.Id]; ok {
+					notifier.CloseNotification(id)
+				}
+
+				n := newNotification()
+				n.AppIcon = getDeviceIcon(device)
+				n.Summary = device.Name
+				n.Body = "New pair request"
+				n.Hints = map[string]dbus.Variant{
+					"category": dbus.MakeVariant("device"),
+				}
+				n.Actions = []string{"pair", "Accept", "unpair", "Reject"}
+				id, _ := notifier.SendNotification(n)
+
+				notifications[device.Id] = int(id)
+			case device := <-e.Paired:
+				if id, ok := notifications[device.Id]; ok {
+					notifier.CloseNotification(id)
+				}
+
+				n := newNotification()
+				n.AppIcon = getDeviceIcon(device)
+				n.Summary = device.Name
 				n.Body = "Device connected"
 				n.Hints = map[string]dbus.Variant{
 					"resident": dbus.MakeVariant(true),
@@ -225,12 +276,42 @@ func main() {
 				id, _ := notifier.SendNotification(n)
 
 				notifications[device.Id] = int(id)
+			case device := <-e.Unpaired:
+				if id, ok := notifications[device.Id]; ok {
+					notifier.CloseNotification(id)
+				}
 			case device := <-e.Leaves:
 				if id, ok := notifications[device.Id]; ok {
 					notifier.CloseNotification(id)
 				}
 				if _, ok := devices[device.Id]; ok {
 					delete(devices, device.Id)
+				}
+			case signal := <-actions:
+				device := getDeviceFromNotification(int(signal.Id))
+				if device == nil {
+					continue
+				}
+
+				log.Println(device.Name, signal.ActionKey)
+
+				switch signal.ActionKey {
+				case "pair":
+					e.PairDevice(device)
+				case "unpair":
+					e.UnpairDevice(device)
+				}
+			case signal := <-closed:
+				device := getDeviceFromNotification(int(signal.Id))
+				if device == nil {
+					continue
+				}
+
+				log.Println(device.Name, signal.Reason)
+
+				switch signal.Reason {
+				case notify.ReasonDismissedByUser:
+					e.UnpairDevice(device)
 				}
 			}
 		}
