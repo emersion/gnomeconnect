@@ -303,15 +303,12 @@ func main() {
 				}
 			case signal := <-closed:
 				device := getDeviceFromNotification(int(signal.Id))
-				if device == nil {
-					continue
-				}
+				if device != nil {
+					log.Println(device.Name, signal.Reason)
 
-				log.Println(device.Name, signal.Reason)
-
-				switch signal.Reason {
-				case notify.ReasonDismissedByUser:
-					e.UnpairDevice(device)
+					if signal.Reason == notify.ReasonDismissedByUser {
+						device.Close()
+					}
 				}
 			}
 		}
