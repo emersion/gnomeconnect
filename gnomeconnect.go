@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"io/ioutil"
+	"encoding/json"
 	"github.com/emersion/go-kdeconnect/crypto"
 	"github.com/emersion/go-kdeconnect/engine"
 	"github.com/emersion/go-kdeconnect/plugin"
@@ -13,7 +14,7 @@ import (
 	"github.com/emersion/go-mpris"
 )
 
-func getPrivateKey() (priv *crypto.PrivateKey, err error) {
+func getConfigDir() (configDir string, err error) {
 	configHomeDir := os.Getenv("XDG_CONFIG_HOME")
 	if configHomeDir == "" {
 		homeDir := os.Getenv("HOME")
@@ -23,17 +24,23 @@ func getPrivateKey() (priv *crypto.PrivateKey, err error) {
 		configHomeDir = homeDir+"/.config"
 	}
 
-	configDir := configHomeDir+"/gnomeconnect"
+	configDir = configHomeDir+"/gnomeconnect"
 	err = os.MkdirAll(configDir, 0755)
+	return
+}
+
+func loadPrivateKey() (priv *crypto.PrivateKey, err error) {
+	configDir, err := getConfigDir()
 	if err != nil {
 		return
 	}
 
+	priv = &crypto.PrivateKey{}
+
 	privateKeyFile := configDir+"/private.pem"
 	raw, err := ioutil.ReadFile(privateKeyFile)
 	if err != nil {
-		priv, err = crypto.GeneratePrivateKey()
-		if err != nil {
+		if err = priv.Generate(); err != nil {
 			return
 		}
 
@@ -46,7 +53,39 @@ func getPrivateKey() (priv *crypto.PrivateKey, err error) {
 		return
 	}
 
-	priv, err = crypto.UnmarshalPrivateKey(raw)
+	err = priv.Unmarshal(raw)
+	return
+}
+
+func loadKnownDevices() (knownDevices []*engine.KnownDevice, err error) {
+	configDir, err := getConfigDir()
+	if err != nil {
+		return
+	}
+
+	knownDevicesFile, err := os.Open(configDir+"/known-devices.json")
+	if err != nil {
+		return
+	}
+
+	dec := json.NewDecoder(knownDevicesFile)
+	err = dec.Decode(&knownDevices)
+	return
+}
+
+func saveKnownDevices(knownDevices []*engine.KnownDevice) (err error) {
+	configDir, err := getConfigDir()
+	if err != nil {
+		return
+	}
+
+	knownDevicesFile, err := os.Create(configDir+"/known-devices.json")
+	if err != nil {
+		return
+	}
+
+	enc := json.NewEncoder(knownDevicesFile)
+	err = enc.Encode(knownDevices)
 	return
 }
 
@@ -72,14 +111,20 @@ func newNotification() notify.Notification {
 func main() {
 	config := engine.DefaultConfig()
 
- 	priv, err := getPrivateKey()
+ 	priv, err := loadPrivateKey()
 	if priv == nil {
 		log.Fatal("Could not get private key:", err)
 	}
 	if err != nil {
-		log.Println("Warning: error while getting private key:", err)
+		log.Println("Warning: error while loading private key:", err)
 	}
 	config.PrivateKey = priv
+
+	knownDevices, err := loadKnownDevices()
+	if err != nil {
+		log.Println("Warning: error while loading known devices:", err)
+	}
+	config.KnownDevices = knownDevices
 
 	battery := plugin.NewBattery()
 	ping := plugin.NewPing()
@@ -224,6 +269,48 @@ func main() {
 			return nil
 		}
 
+		deviceAvailable := func(device *network.Device) {
+			n := newNotification()
+			n.AppIcon = getDeviceIcon(device)
+			n.Summary = device.Name
+			n.Body = "New device available"
+			n.Hints = map[string]dbus.Variant{
+				"category": dbus.MakeVariant("device"),
+			}
+			n.Actions = []string{"pair", "Pair device"}
+			id, _ := notifier.SendNotification(n)
+
+			notifications[device.Id] = int(id)
+		}
+
+		deviceRequestsPairing := func(device *network.Device) {
+			n := newNotification()
+			n.AppIcon = getDeviceIcon(device)
+			n.Summary = device.Name
+			n.Body = "New pair request"
+			n.Hints = map[string]dbus.Variant{
+				"category": dbus.MakeVariant("device"),
+			}
+			n.Actions = []string{"pair", "Accept", "unpair", "Reject"}
+			id, _ := notifier.SendNotification(n)
+
+			notifications[device.Id] = int(id)
+		}
+
+		deviceConnected := func(device *network.Device) {
+			n := newNotification()
+			n.AppIcon = getDeviceIcon(device)
+			n.Summary = device.Name
+			n.Body = "Device connected"
+			n.Hints = map[string]dbus.Variant{
+				"resident": dbus.MakeVariant(true),
+				"category": dbus.MakeVariant("device.added"),
+			}
+			id, _ := notifier.SendNotification(n)
+
+			notifications[device.Id] = int(id)
+		}
+
 		for {
 			select {
 			case device := <-e.Joins:
@@ -233,49 +320,28 @@ func main() {
 
 				devices[device.Id] = device
 
-				n := newNotification()
-				n.AppIcon = getDeviceIcon(device)
-				n.Summary = device.Name
-				n.Body = "New device available"
-				n.Hints = map[string]dbus.Variant{
-					"category": dbus.MakeVariant("device"),
+				if device.Paired {
+					deviceConnected(device)
+				} else {
+					deviceAvailable(device)
 				}
-				n.Actions = []string{"pair", "Pair device"}
-				id, _ := notifier.SendNotification(n)
-
-				notifications[device.Id] = int(id)
 			case device := <-e.RequestsPairing:
 				if id, ok := notifications[device.Id]; ok {
 					notifier.CloseNotification(id)
 				}
 
-				n := newNotification()
-				n.AppIcon = getDeviceIcon(device)
-				n.Summary = device.Name
-				n.Body = "New pair request"
-				n.Hints = map[string]dbus.Variant{
-					"category": dbus.MakeVariant("device"),
-				}
-				n.Actions = []string{"pair", "Accept", "unpair", "Reject"}
-				id, _ := notifier.SendNotification(n)
-
-				notifications[device.Id] = int(id)
+				deviceRequestsPairing(device)
 			case device := <-e.Paired:
 				if id, ok := notifications[device.Id]; ok {
 					notifier.CloseNotification(id)
 				}
 
-				n := newNotification()
-				n.AppIcon = getDeviceIcon(device)
-				n.Summary = device.Name
-				n.Body = "Device connected"
-				n.Hints = map[string]dbus.Variant{
-					"resident": dbus.MakeVariant(true),
-					"category": dbus.MakeVariant("device.added"),
+				err := saveKnownDevices(config.KnownDevices)
+				if err != nil {
+					log.Println("Cannot save known devices:", err)
 				}
-				id, _ := notifier.SendNotification(n)
 
-				notifications[device.Id] = int(id)
+				deviceConnected(device)
 			case device := <-e.Unpaired:
 				if id, ok := notifications[device.Id]; ok {
 					notifier.CloseNotification(id)
@@ -297,9 +363,15 @@ func main() {
 
 				switch signal.ActionKey {
 				case "pair":
-					e.PairDevice(device)
+					err := e.PairDevice(device)
+					if err != nil {
+						log.Println("Cannot pair device:", err)
+					}
 				case "unpair":
-					e.UnpairDevice(device)
+					err := e.UnpairDevice(device)
+					if err != nil {
+						log.Println("Cannot unpair device:", err)
+					}
 				}
 			case signal := <-closed:
 				device := getDeviceFromNotification(int(signal.Id))
@@ -307,7 +379,7 @@ func main() {
 					log.Println(device.Name, signal.Reason)
 
 					if signal.Reason == notify.ReasonDismissedByUser {
-						device.Close()
+						//device.Close()
 					}
 				}
 			}
