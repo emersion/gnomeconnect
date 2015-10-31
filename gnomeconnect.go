@@ -145,6 +145,7 @@ func main() {
 	go (func() {
 		notificationsMap := map[string]int{}
 		var callNotification int
+		var batteryNotification int
 
 		for {
 			select {
@@ -162,9 +163,16 @@ func main() {
 					n := newNotification()
 					n.AppIcon = "battery-caution"
 					n.Summary = event.Device.Name+" has low battery"
-					notifier.SendNotification(n)
+					id, _ := notifier.SendNotification(n)
+					batteryNotification = int(id)
 				}
-				// TODO: remove notification when charging
+
+				if event.IsCharging {
+					if batteryNotification != 0 {
+						notifier.CloseNotification(batteryNotification)
+						batteryNotification = 0
+					}
+				}
 			case event := <-notification.Incoming:
 				log.Println("Notification:", event.Device.Name, event.NotificationBody)
 
@@ -266,6 +274,7 @@ func main() {
 				if event.IsCancel {
 					if callNotification != 0 {
 						notifier.CloseNotification(callNotification)
+						callNotification = 0
 					}
 					break
 				}
