@@ -130,6 +130,7 @@ func main() {
 	ping := plugin.NewPing()
 	notification := plugin.NewNotification()
 	mprisPlugin := plugin.NewMpris()
+	telephony := plugin.NewTelephony()
 
 	conn, err := dbus.SessionBus()
 	if err != nil {
@@ -142,6 +143,8 @@ func main() {
 	}
 
 	go (func() {
+		notificationsMap := map[string]int{}
+
 		for {
 			select {
 			case event := <-ping.Incoming:
@@ -164,8 +167,12 @@ func main() {
 			case event := <-notification.Incoming:
 				log.Println("Notification:", event.Device.Name, event.NotificationBody)
 
+				id, exists := notificationsMap[event.NotificationBody.Id]
+
 				if event.IsCancel {
-					// TODO: dismiss notification
+					if exists {
+						notifier.CloseNotification(id)
+					}
 					break
 				}
 
@@ -173,7 +180,12 @@ func main() {
 				n.AppIcon = getDeviceIcon(event.Device)
 				n.Summary = "Notification from "+event.AppName+" on "+event.Device.Name
 				n.Body = event.Ticker
-				notifier.SendNotification(n)
+				if exists {
+					n.ReplacesID = uint32(id)
+				}
+				newId, _ := notifier.SendNotification(n)
+
+				notificationsMap[event.NotificationBody.Id] = int(newId)
 
 				// TODO: wait for notification dismiss and send message to remote
 			case event := <-mprisPlugin.Incoming:
@@ -230,6 +242,39 @@ func main() {
 						event.Device.Send(plugin.MprisType, reply)
 					}
 				}
+			case event := <-telephony.Incoming:
+				log.Println("Telephony:", event.Device.Name, event.TelephonyBody)
+
+				contactName := event.PhoneNumber
+				if contactName == "" {
+					contactName = event.PhoneNumber
+				}
+
+				n := newNotification()
+				n.AppIcon = getDeviceIcon(event.Device)
+				n.Hints = map[string]dbus.Variant{
+					"category": dbus.MakeVariant("im"),
+				}
+
+				switch event.TelephonyBody.Event {
+				case plugin.TelephonySms:
+					n.Hints = map[string]dbus.Variant{
+						"category": dbus.MakeVariant("im.received"),
+					}
+					n.Summary = "SMS from "+contactName+" on "+event.Device.Name
+					n.Body = event.MessageBody
+				case plugin.TelephonyRinging:
+					n.AppIcon = "call-start"
+					n.Summary = "Call from "+contactName+" on "+event.Device.Name
+				case plugin.TelephonyTalking:
+					n.AppIcon = "call-start"
+					n.Summary = "Calling "+contactName+" on "+event.Device.Name
+				case plugin.TelephonyMissedCall:
+					n.AppIcon = "call-stop"
+					n.Summary = "Missed call from "+contactName+" on "+event.Device.Name
+				}
+
+				notifier.SendNotification(n)
 			}
 		}
 	})()
@@ -239,6 +284,7 @@ func main() {
 	hdlr.Register(ping)
 	hdlr.Register(notification)
 	hdlr.Register(mprisPlugin)
+	hdlr.Register(telephony)
 
 	e := engine.New(hdlr, config)
 
