@@ -144,6 +144,7 @@ func main() {
 
 	go (func() {
 		notificationsMap := map[string]int{}
+		var callNotification int
 
 		for {
 			select {
@@ -250,19 +251,34 @@ func main() {
 					contactName = event.PhoneNumber
 				}
 
-				n := newNotification()
-				n.AppIcon = getDeviceIcon(event.Device)
-				n.Hints = map[string]dbus.Variant{
-					"category": dbus.MakeVariant("im"),
-				}
-
-				switch event.TelephonyBody.Event {
-				case plugin.TelephonySms:
+				if event.TelephonyBody.Event == plugin.TelephonySms {
+					n := newNotification()
+					n.AppIcon = getDeviceIcon(event.Device)
 					n.Hints = map[string]dbus.Variant{
 						"category": dbus.MakeVariant("im.received"),
 					}
 					n.Summary = "SMS from "+contactName+" on "+event.Device.Name
 					n.Body = event.MessageBody
+					notifier.SendNotification(n)
+					break
+				}
+
+				if event.IsCancel {
+					if callNotification != 0 {
+						notifier.CloseNotification(callNotification)
+					}
+					break
+				}
+
+				n := newNotification()
+				n.Hints = map[string]dbus.Variant{
+					"category": dbus.MakeVariant("im"),
+				}
+				if callNotification != 0 {
+					n.ReplacesID = uint32(callNotification)
+				}
+
+				switch event.TelephonyBody.Event {
 				case plugin.TelephonyRinging:
 					n.AppIcon = "call-start"
 					n.Summary = "Call from "+contactName+" on "+event.Device.Name
@@ -274,7 +290,8 @@ func main() {
 					n.Summary = "Missed call from "+contactName+" on "+event.Device.Name
 				}
 
-				notifier.SendNotification(n)
+				id, _ := notifier.SendNotification(n)
+				callNotification = int(id)
 			}
 		}
 	})()
