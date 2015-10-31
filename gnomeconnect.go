@@ -1,20 +1,20 @@
 package main
 
 import (
+	"encoding/json"
+	"github.com/allan-simon/go-singleinstance"
+	"github.com/emersion/go-kdeconnect/crypto"
+	"github.com/emersion/go-kdeconnect/engine"
+	"github.com/emersion/go-kdeconnect/network"
+	"github.com/emersion/go-kdeconnect/plugin"
+	"github.com/emersion/go-mpris"
+	"github.com/esiqveland/notify"
+	"github.com/godbus/dbus"
+	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
-	"io/ioutil"
-	"encoding/json"
-	"github.com/emersion/go-kdeconnect/crypto"
-	"github.com/emersion/go-kdeconnect/engine"
-	"github.com/emersion/go-kdeconnect/plugin"
-	"github.com/emersion/go-kdeconnect/network"
-	"github.com/godbus/dbus"
-	"github.com/esiqveland/notify"
-	"github.com/emersion/go-mpris"
-	"github.com/allan-simon/go-singleinstance"
 )
 
 func getConfigDir() (configDir string, err error) {
@@ -24,10 +24,10 @@ func getConfigDir() (configDir string, err error) {
 		if homeDir == "" {
 			return
 		}
-		configHomeDir = homeDir+"/.config"
+		configHomeDir = homeDir + "/.config"
 	}
 
-	configDir = configHomeDir+"/gnomeconnect"
+	configDir = configHomeDir + "/gnomeconnect"
 	err = os.MkdirAll(configDir, 0755)
 	return
 }
@@ -38,7 +38,7 @@ func createLockFile() error {
 		return err
 	}
 
-	_, err = singleinstance.CreateLockFile(configDir+"/server.lock")
+	_, err = singleinstance.CreateLockFile(configDir + "/server.lock")
 	return err
 }
 
@@ -50,7 +50,7 @@ func loadPrivateKey() (priv *crypto.PrivateKey, err error) {
 
 	priv = &crypto.PrivateKey{}
 
-	privateKeyFile := configDir+"/private.pem"
+	privateKeyFile := configDir + "/private.pem"
 	raw, err := ioutil.ReadFile(privateKeyFile)
 	if err != nil {
 		if err = priv.Generate(); err != nil {
@@ -76,7 +76,7 @@ func loadKnownDevices() (knownDevices []*engine.KnownDevice, err error) {
 		return
 	}
 
-	knownDevicesFile, err := os.Open(configDir+"/known-devices.json")
+	knownDevicesFile, err := os.Open(configDir + "/known-devices.json")
 	if err != nil {
 		return
 	}
@@ -92,7 +92,7 @@ func saveKnownDevices(knownDevices []*engine.KnownDevice) (err error) {
 		return
 	}
 
-	knownDevicesFile, err := os.Create(configDir+"/known-devices.json")
+	knownDevicesFile, err := os.Create(configDir + "/known-devices.json")
 	if err != nil {
 		return
 	}
@@ -129,7 +129,7 @@ func main() {
 
 	config := engine.DefaultConfig()
 
- 	priv, err := loadPrivateKey()
+	priv, err := loadPrivateKey()
 	if priv == nil {
 		log.Fatal("Could not get private key:", err)
 	}
@@ -172,7 +172,7 @@ func main() {
 
 				n := newNotification()
 				n.AppIcon = getDeviceIcon(event.Device)
-				n.Summary = "Ping from "+event.Device.Name
+				n.Summary = "Ping from " + event.Device.Name
 				notifier.SendNotification(n)
 			case event := <-battery.Incoming:
 				log.Println("Battery:", event.Device.Name, event.BatteryBody)
@@ -180,7 +180,7 @@ func main() {
 				if event.ThresholdEvent == plugin.BatteryThresholdEventLow {
 					n := newNotification()
 					n.AppIcon = "battery-caution"
-					n.Summary = event.Device.Name+" has low battery"
+					n.Summary = event.Device.Name + " has low battery"
 					id, _ := notifier.SendNotification(n)
 					batteryNotification = int(id)
 				}
@@ -205,7 +205,7 @@ func main() {
 
 				n := newNotification()
 				n.AppIcon = getDeviceIcon(event.Device)
-				n.Summary = "Notification from "+event.AppName+" on "+event.Device.Name
+				n.Summary = "Notification from " + event.AppName + " on " + event.Device.Name
 				n.Body = event.Ticker
 				if exists {
 					n.ReplacesID = uint32(id)
@@ -283,7 +283,7 @@ func main() {
 					n.Hints = map[string]dbus.Variant{
 						"category": dbus.MakeVariant("im.received"),
 					}
-					n.Summary = "SMS from "+contactName+" on "+event.Device.Name
+					n.Summary = "SMS from " + contactName + " on " + event.Device.Name
 					n.Body = event.MessageBody
 					notifier.SendNotification(n)
 					break
@@ -308,13 +308,13 @@ func main() {
 				switch event.TelephonyBody.Event {
 				case plugin.TelephonyRinging:
 					n.AppIcon = "call-start"
-					n.Summary = "Call from "+contactName+" on "+event.Device.Name
+					n.Summary = "Call from " + contactName + " on " + event.Device.Name
 				case plugin.TelephonyTalking:
 					n.AppIcon = "call-start"
-					n.Summary = "Calling "+contactName+" on "+event.Device.Name
+					n.Summary = "Calling " + contactName + " on " + event.Device.Name
 				case plugin.TelephonyMissedCall:
 					n.AppIcon = "call-stop"
-					n.Summary = "Missed call from "+contactName+" on "+event.Device.Name
+					n.Summary = "Missed call from " + contactName + " on " + event.Device.Name
 				}
 
 				id, _ := notifier.SendNotification(n)
@@ -342,7 +342,7 @@ func main() {
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
-		getDeviceFromNotification := func (notificationId int) *network.Device {
+		getDeviceFromNotification := func(notificationId int) *network.Device {
 			for deviceId, id := range notifications {
 				if id == notificationId {
 					if device, ok := devices[deviceId]; ok {
