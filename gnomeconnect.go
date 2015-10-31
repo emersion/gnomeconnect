@@ -3,6 +3,8 @@ package main
 import (
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"io/ioutil"
 	"encoding/json"
 	"github.com/emersion/go-kdeconnect/crypto"
@@ -337,12 +339,8 @@ func main() {
 		closed := notifier.NotificationClosed()
 		actions := notifier.ActionInvoked()
 
-		defer (func() {
-			// Close all notifications
-			for _, id := range notifications {
-				notifier.CloseNotification(id)
-			}
-		})()
+		sigs := make(chan os.Signal, 1)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
 
 		getDeviceFromNotification := func (notificationId int) *network.Device {
 			for deviceId, id := range notifications {
@@ -397,6 +395,13 @@ func main() {
 			id, _ := notifier.SendNotification(n)
 
 			notifications[device.Id] = int(id)
+		}
+
+		cleanup := func() {
+			// Close all notifications
+			for _, id := range notifications {
+				notifier.CloseNotification(id)
+			}
 		}
 
 		for {
@@ -470,6 +475,10 @@ func main() {
 						//device.Close()
 					}
 				}
+			case <-sigs:
+				// Interrupt signal received
+				cleanup()
+				os.Exit(0)
 			}
 		}
 	})()
