@@ -30,6 +30,9 @@ func getDeviceIcon(device *network.Device) string {
 func newNotification() notify.Notification {
 	return notify.Notification{
 		AppName: "GNOMEConnect",
+		Hints: map[string]dbus.Variant{
+			"desktop-entry": dbus.MakeVariant("gnomeconnect"),
+		},
 	}
 }
 
@@ -194,9 +197,7 @@ func main() {
 				if event.TelephonyBody.Event == plugin.TelephonySms {
 					n := newNotification()
 					n.AppIcon = getDeviceIcon(event.Device)
-					n.Hints = map[string]dbus.Variant{
-						"category": dbus.MakeVariant("im.received"),
-					}
+					n.Hints["category"] = dbus.MakeVariant("im.received")
 					n.Summary = "SMS from " + contactName + " on " + event.Device.Name
 					n.Body = event.MessageBody
 					notifier.SendNotification(n)
@@ -212,9 +213,7 @@ func main() {
 				}
 
 				n := newNotification()
-				n.Hints = map[string]dbus.Variant{
-					"category": dbus.MakeVariant("im"),
-				}
+				n.Hints["category"] = dbus.MakeVariant("im")
 				if callNotification != 0 {
 					n.ReplacesID = uint32(callNotification)
 				}
@@ -279,9 +278,7 @@ func main() {
 			n.AppIcon = getDeviceIcon(device)
 			n.Summary = device.Name
 			n.Body = "New device available"
-			n.Hints = map[string]dbus.Variant{
-				"category": dbus.MakeVariant("device"),
-			}
+			n.Hints["category"] = dbus.MakeVariant("device")
 			n.Actions = []string{"pair", "Pair device"}
 			id, _ := notifier.SendNotification(n)
 
@@ -293,9 +290,7 @@ func main() {
 			n.AppIcon = getDeviceIcon(device)
 			n.Summary = device.Name
 			n.Body = "New pair request"
-			n.Hints = map[string]dbus.Variant{
-				"category": dbus.MakeVariant("device"),
-			}
+			n.Hints["category"] = dbus.MakeVariant("device")
 			n.Actions = []string{"pair", "Accept", "unpair", "Reject"}
 			id, _ := notifier.SendNotification(n)
 
@@ -307,10 +302,8 @@ func main() {
 			n.AppIcon = getDeviceIcon(device)
 			n.Summary = device.Name
 			n.Body = "Device connected"
-			n.Hints = map[string]dbus.Variant{
-				"resident": dbus.MakeVariant(true),
-				"category": dbus.MakeVariant("device.added"),
-			}
+			n.Hints["resident"] = dbus.MakeVariant(true)
+			n.Hints["category"] = dbus.MakeVariant("device.added")
 			n.Actions = []string{"browse", "Browse"}
 			id, _ := notifier.SendNotification(n)
 
