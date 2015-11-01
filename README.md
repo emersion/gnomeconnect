@@ -22,7 +22,7 @@ make
 
 ## SFTP plugin
 
-The Android app exposes a SFTP plugin, but it uses `rsa-dss`, which has been
+The Android app exposes a SFTP plugin, but it uses `ssh-dss`, which has been
 removed by default from `ssh` due to security concerns. To be able to use it,
 edit `~/.ssh/config` and add:
 
