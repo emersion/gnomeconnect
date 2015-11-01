@@ -7,6 +7,7 @@ import (
 	"github.com/emersion/go-kdeconnect/engine"
 	"io/ioutil"
 	"os"
+	"syscall"
 )
 
 func GetConfigDir() (configDir string, err error) {
@@ -32,6 +33,25 @@ func CreateLockFile() error {
 
 	_, err = singleinstance.CreateLockFile(configDir + "/server.lock")
 	return err
+}
+
+func NotifyLockingPid() error {
+	configDir, err := GetConfigDir()
+	if err != nil {
+		return err
+	}
+
+	pid, err := singleinstance.GetLockFilePid(configDir + "/server.lock")
+	if err != nil {
+		return err
+	}
+
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+
+	return proc.Signal(syscall.SIGUSR1)
 }
 
 func LoadPrivateKey() (priv *crypto.PrivateKey, err error) {

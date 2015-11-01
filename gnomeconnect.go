@@ -36,6 +36,7 @@ func newNotification() notify.Notification {
 func main() {
 	err := utils.CreateLockFile()
 	if err != nil {
+		utils.NotifyLockingPid()
 		log.Fatal("Cannot create lock file:", err)
 	}
 
@@ -258,7 +259,7 @@ func main() {
 		actions := notifier.ActionInvoked()
 
 		sigs := make(chan os.Signal, 1)
-		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
+		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
 
 		getDeviceFromNotification := func(notificationId int) *network.Device {
 			for deviceId, id := range notifications {
@@ -392,14 +393,28 @@ func main() {
 				if device != nil {
 					log.Println(device.Name, signal.Reason)
 
+					delete(notifications, device.Id)
+
 					if signal.Reason == notify.ReasonDismissedByUser {
 						//device.Close()
 					}
 				}
-			case <-sigs:
-				// Interrupt signal received
-				cleanup()
-				os.Exit(0)
+			case signal := <-sigs:
+				if signal == syscall.SIGUSR1 {
+					// Restore device notifications
+					for _, device := range devices {
+						if !device.Paired {
+							continue
+						}
+						if _, ok := notifications[device.Id]; !ok {
+							deviceConnected(device)
+						}
+					}
+				} else {
+					// Interrupt signal received
+					cleanup()
+					os.Exit(0)
+				}
 			}
 		}
 	})()
