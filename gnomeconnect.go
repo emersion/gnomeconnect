@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/emersion/gnomeconnect/ui"
 	"github.com/emersion/gnomeconnect/utils"
 	"github.com/emersion/go-kdeconnect/engine"
 	"github.com/emersion/go-kdeconnect/network"
@@ -13,19 +14,6 @@ import (
 	"os/signal"
 	"syscall"
 )
-
-func getDeviceIcon(device *network.Device) string {
-	switch device.Type {
-	case "phone":
-		return "phone"
-	case "tablet":
-		return "pda" // TODO: find something better
-	case "desktop":
-		return "computer"
-	default:
-		return ""
-	}
-}
 
 func newNotification() notify.Notification {
 	return notify.Notification{
@@ -88,7 +76,7 @@ func main() {
 				log.Println("Ping:", event.Device.Name)
 
 				n := newNotification()
-				n.AppIcon = getDeviceIcon(event.Device)
+				n.AppIcon = utils.GetDeviceIcon(event.Device)
 				n.Summary = "Ping from " + event.Device.Name
 				notifier.SendNotification(n)
 			case event := <-battery.Incoming:
@@ -121,7 +109,7 @@ func main() {
 				}
 
 				n := newNotification()
-				n.AppIcon = getDeviceIcon(event.Device)
+				n.AppIcon = utils.GetDeviceIcon(event.Device)
 				n.Summary = "Notification from " + event.AppName + " on " + event.Device.Name
 				n.Body = event.Ticker
 				if exists {
@@ -196,7 +184,7 @@ func main() {
 
 				if event.TelephonyBody.Event == plugin.TelephonySms {
 					n := newNotification()
-					n.AppIcon = getDeviceIcon(event.Device)
+					n.AppIcon = utils.GetDeviceIcon(event.Device)
 					n.Hints["category"] = dbus.MakeVariant("im.received")
 					n.Summary = "SMS from " + contactName + " on " + event.Device.Name
 					n.Body = event.MessageBody
@@ -250,6 +238,8 @@ func main() {
 
 	e := engine.New(hdlr, config)
 
+	var i *ui.Ui
+
 	go (func() {
 		devices := map[string]*network.Device{}
 		notifications := map[string]int{}
@@ -259,6 +249,31 @@ func main() {
 
 		sigs := make(chan os.Signal, 1)
 		signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM, syscall.SIGUSR1)
+
+		startUi := func() {
+			if i == nil {
+				plugins := &ui.PluginCollection{
+					Sftp: sftp,
+				}
+
+				i = ui.New(e, plugins)
+
+				for _, d := range devices {
+					if d.Paired {
+						i.Connected <- d
+					} else {
+						i.Available <- d
+					}
+				}
+
+				go (func() {
+					<-i.Quit
+					i = nil
+				})()
+			} else {
+				i.Raise()
+			}
+		}
 
 		getDeviceFromNotification := func(notificationId int) *network.Device {
 			for deviceId, id := range notifications {
@@ -275,7 +290,7 @@ func main() {
 
 		deviceAvailable := func(device *network.Device) {
 			n := newNotification()
-			n.AppIcon = getDeviceIcon(device)
+			n.AppIcon = utils.GetDeviceIcon(device)
 			n.Summary = device.Name
 			n.Body = "New device available"
 			n.Hints["category"] = dbus.MakeVariant("device")
@@ -283,11 +298,15 @@ func main() {
 			id, _ := notifier.SendNotification(n)
 
 			notifications[device.Id] = int(id)
+
+			if i != nil {
+				i.Available <- device
+			}
 		}
 
 		deviceRequestsPairing := func(device *network.Device) {
 			n := newNotification()
-			n.AppIcon = getDeviceIcon(device)
+			n.AppIcon = utils.GetDeviceIcon(device)
 			n.Summary = device.Name
 			n.Body = "New pair request"
 			n.Hints["category"] = dbus.MakeVariant("device")
@@ -299,15 +318,19 @@ func main() {
 
 		deviceConnected := func(device *network.Device) {
 			n := newNotification()
-			n.AppIcon = getDeviceIcon(device)
+			n.AppIcon = utils.GetDeviceIcon(device)
 			n.Summary = device.Name
 			n.Body = "Device connected"
 			n.Hints["resident"] = dbus.MakeVariant(true)
 			n.Hints["category"] = dbus.MakeVariant("device.added")
-			n.Actions = []string{"browse", "Browse"}
+			n.Actions = []string{"default", "Open"}
 			id, _ := notifier.SendNotification(n)
 
 			notifications[device.Id] = int(id)
+
+			if i != nil {
+				i.Connected <- device
+			}
 		}
 
 		cleanup := func() {
@@ -352,12 +375,20 @@ func main() {
 				if id, ok := notifications[device.Id]; ok {
 					notifier.CloseNotification(id)
 				}
+
+				if i != nil {
+					i.Disconnected <- device
+				}
 			case device := <-e.Leaves:
 				if id, ok := notifications[device.Id]; ok {
 					notifier.CloseNotification(id)
 				}
 				if _, ok := devices[device.Id]; ok {
 					delete(devices, device.Id)
+				}
+
+				if i != nil {
+					i.Unavailable <- device
 				}
 			case signal := <-actions:
 				device := getDeviceFromNotification(int(signal.Id))
@@ -378,8 +409,9 @@ func main() {
 					if err != nil {
 						log.Println("Cannot unpair device:", err)
 					}
-				case "browse":
-					sftp.SendStartBrowsing(device)
+				case "default":
+					startUi()
+					i.SelectDevice(device)
 				}
 			case signal := <-closed:
 				device := getDeviceFromNotification(int(signal.Id))
@@ -403,6 +435,8 @@ func main() {
 							deviceConnected(device)
 						}
 					}
+
+					startUi()
 				} else {
 					// Interrupt signal received
 					cleanup()
