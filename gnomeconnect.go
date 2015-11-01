@@ -1,106 +1,18 @@
 package main
 
 import (
-	"encoding/json"
-	"github.com/allan-simon/go-singleinstance"
-	"github.com/emersion/go-kdeconnect/crypto"
+	"github.com/emersion/gnomeconnect/utils"
 	"github.com/emersion/go-kdeconnect/engine"
 	"github.com/emersion/go-kdeconnect/network"
 	"github.com/emersion/go-kdeconnect/plugin"
 	"github.com/emersion/go-mpris"
 	"github.com/esiqveland/notify"
 	"github.com/godbus/dbus"
-	"io/ioutil"
 	"log"
 	"os"
 	"os/signal"
 	"syscall"
 )
-
-func getConfigDir() (configDir string, err error) {
-	configHomeDir := os.Getenv("XDG_CONFIG_HOME")
-	if configHomeDir == "" {
-		homeDir := os.Getenv("HOME")
-		if homeDir == "" {
-			return
-		}
-		configHomeDir = homeDir + "/.config"
-	}
-
-	configDir = configHomeDir + "/gnomeconnect"
-	err = os.MkdirAll(configDir, 0755)
-	return
-}
-
-func createLockFile() error {
-	configDir, err := getConfigDir()
-	if err != nil {
-		return err
-	}
-
-	_, err = singleinstance.CreateLockFile(configDir + "/server.lock")
-	return err
-}
-
-func loadPrivateKey() (priv *crypto.PrivateKey, err error) {
-	configDir, err := getConfigDir()
-	if err != nil {
-		return
-	}
-
-	priv = &crypto.PrivateKey{}
-
-	privateKeyFile := configDir + "/private.pem"
-	raw, err := ioutil.ReadFile(privateKeyFile)
-	if err != nil {
-		if err = priv.Generate(); err != nil {
-			return
-		}
-
-		raw, err = priv.Marshal()
-		if err != nil {
-			return
-		}
-
-		err = ioutil.WriteFile(privateKeyFile, raw, 0644)
-		return
-	}
-
-	err = priv.Unmarshal(raw)
-	return
-}
-
-func loadKnownDevices() (knownDevices []*engine.KnownDevice, err error) {
-	configDir, err := getConfigDir()
-	if err != nil {
-		return
-	}
-
-	knownDevicesFile, err := os.Open(configDir + "/known-devices.json")
-	if err != nil {
-		return
-	}
-
-	dec := json.NewDecoder(knownDevicesFile)
-	err = dec.Decode(&knownDevices)
-	return
-}
-
-func saveKnownDevices(knownDevices []*engine.KnownDevice) (err error) {
-	configDir, err := getConfigDir()
-	if err != nil {
-		return
-	}
-
-	knownDevicesFile, err := os.Create(configDir + "/known-devices.json")
-	if err != nil {
-		return
-	}
-
-	enc := json.NewEncoder(knownDevicesFile)
-	err = enc.Encode(knownDevices)
-	return
-}
 
 func getDeviceIcon(device *network.Device) string {
 	switch device.Type {
@@ -122,14 +34,14 @@ func newNotification() notify.Notification {
 }
 
 func main() {
-	err := createLockFile()
+	err := utils.CreateLockFile()
 	if err != nil {
 		log.Fatal("Cannot create lock file:", err)
 	}
 
 	config := engine.DefaultConfig()
 
-	priv, err := loadPrivateKey()
+	priv, err := utils.LoadPrivateKey()
 	if priv == nil {
 		log.Fatal("Could not get private key:", err)
 	}
@@ -138,7 +50,7 @@ func main() {
 	}
 	config.PrivateKey = priv
 
-	knownDevices, err := loadKnownDevices()
+	knownDevices, err := utils.LoadKnownDevices()
 	if err != nil {
 		log.Println("Warning: error while loading known devices:", err)
 	}
@@ -149,6 +61,7 @@ func main() {
 	notification := plugin.NewNotification()
 	mprisPlugin := plugin.NewMpris()
 	telephony := plugin.NewTelephony()
+	sftp := plugin.NewSftp()
 
 	conn, err := dbus.SessionBus()
 	if err != nil {
@@ -319,6 +232,10 @@ func main() {
 
 				id, _ := notifier.SendNotification(n)
 				callNotification = int(id)
+			case event := <-sftp.Incoming:
+				log.Println("Sftp:", event.Device.Name, event.SftpBody)
+
+				utils.MountSftp(event.Ip, event.Port, event.User, event.Password)
 			}
 		}
 	})()
@@ -329,6 +246,7 @@ func main() {
 	hdlr.Register(notification)
 	hdlr.Register(mprisPlugin)
 	hdlr.Register(telephony)
+	hdlr.Register(sftp)
 
 	e := engine.New(hdlr, config)
 
@@ -392,6 +310,7 @@ func main() {
 				"resident": dbus.MakeVariant(true),
 				"category": dbus.MakeVariant("device.added"),
 			}
+			n.Actions = []string{"browse", "Browse"}
 			id, _ := notifier.SendNotification(n)
 
 			notifications[device.Id] = int(id)
@@ -429,7 +348,7 @@ func main() {
 					notifier.CloseNotification(id)
 				}
 
-				err := saveKnownDevices(config.KnownDevices)
+				err := utils.SaveKnownDevices(config.KnownDevices)
 				if err != nil {
 					log.Println("Cannot save known devices:", err)
 				}
@@ -465,6 +384,8 @@ func main() {
 					if err != nil {
 						log.Println("Cannot unpair device:", err)
 					}
+				case "browse":
+					sftp.SendStartBrowsing(device)
 				}
 			case signal := <-closed:
 				device := getDeviceFromNotification(int(signal.Id))
